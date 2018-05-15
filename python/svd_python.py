@@ -71,7 +71,13 @@ def update_train(inter_keys, global_speed, global_vis, global_train, global_targ
     train = np.array(operator.itemgetter(*inter_keys)(global_vis))
     print('before: ', train.shape, inter_keys, target)
     if isinstance(target[0], list):
-        target = list(map(lambda a: np.mean(np.array(a)[np.where(np.array(a)>0.08)]), target))
+        target_list = []
+        for tar in target:
+            w = np.where(np.array(tar)>0.08)
+            if len(w[0]) == 0: # когда скорость 0, у данной точки будет класс - 2, что наверное не правильно, тк 0 быть не может вообще
+                target_list.append(0)
+            else:
+                target_list.append(np.mean(np.array(tar)[w]))
     else:
         target = np.array([np.mean(target)])
     if len(target) == 0:
@@ -89,12 +95,13 @@ def update_train(inter_keys, global_speed, global_vis, global_train, global_targ
             num = [tar]*len(train[i]) if isinstance(train[i], list) else [tar]
             train = np.concatenate(train)
         target_new.append(num)
+
     target = np.concatenate(target_new)
-    print('target shape: ', target.shape, train.shape)
+    print('target shape: ', target.shape)
     global_target.append(target)
     global_train.append(train)
 
-def load_image(robot_num=25, width=224, height=224, quality=150, path_img=None, first=False, a=0):
+def load_image(robot_num=25, width=224, height=224, quality=150, path_img=None, a=0, mode='bin'):
     if path_img is not None:
          img = Image.open(path_img)
          img = np.array(img.resize((224, 224)))
@@ -103,25 +110,31 @@ def load_image(robot_num=25, width=224, height=224, quality=150, path_img=None, 
         cap.open('http://192.168.88.%i:8080/stream?topic=/camera/rgb/image_raw&width=%i&height=%i&quality=%i'
                  %(int(robot_num), int(width), int(height), int(quality)))
         _, img = cap.read()
-    cv2.imwrite('./images/img/{}_{}.png'.format(a, a), img)
-    img = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
-    img[:,:,0] = 0.
-    img[:,:,-1] = 255.
-    img[:,:,1] = np.array([0. if i < 100. else 255. for i in img[:,:,1].ravel()]).reshape(224, 224)
-    img = cv2.cvtColor(img, cv2.COLOR_HSV2BGR)
+    if mode == 'bin':
+        img = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+        img[:,:,0] = 0.
+        img[:,:,-1] = 255.
+        img[:,:,1] = np.array([0. if i < 100. else 255. for i in img[:,:,1].ravel()]).reshape(224, 224)
+        img = cv2.cvtColor(img, cv2.COLOR_HSV2BGR)
+    else:
+        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+
+    # cv2.imwrite('./images/img/{}_{}.png'.format(a, a), img)
     return img
 
-def get_vis_signs(img, a):
+def get_vis_signs(img, a, mode='bin'):
     img = Image.fromarray(img)
     a += 1
     img = img.filter(ImageFilter.MedianFilter(size=11))
-    img.save('./images/img/{}.png'.format(a))
-    img = img.resize((28, 28))
-    visual_signs = (np.array(img)/255.).copy()
-    # img = np.array(img)/255.
-    # if len(img.shape) == 3:
-    #     img = img.reshape(1, *img.shape)
-    # visual_signs = model.predict(img)
+    # img.save('./images/img/{}.png'.format(a))
+    if mode == 'bin':
+        img = img.resize((28, 28))
+        visual_signs = (np.array(img)/255.).copy()
+    else:
+        img = np.array(img)/255.
+        if len(img.shape) == 3:
+            img = img.reshape(1, *img.shape)
+        visual_signs = model.predict(img)
     return visual_signs
 
 def main():
@@ -134,10 +147,17 @@ def main():
     speed_keys = set()
     flag_tree = 0
     tree = None # будущее дерево
-    first = True # если мы получаем изображение первый раз, получи его дважды, чтобы выкинуть плохое изображение
     ind = 0 # индекс чтобы не считывать одни и те же данные несколько раз
     v = 0
     k = 0
+    inter = []
+    mode = 'bin'
+
+    if mode == 'bin':
+        shape = 2
+    else:
+        shape = 128
+
     while True:
         new_img = requests.get("http://127.0.0.1:5000/new_image/")#шарп говорит когда начинать обрабатыавть новую картинку
         try:
@@ -163,13 +183,12 @@ def main():
 
             t = time.time()
             img = load_image(path_img='./mirea_images/real_images/V01-14-19-1419.jpg')
-            # img = load_image(robot_num=robot_num, width=width, height=height, quality=quality, first=first, a=k)
-            first = False
+            #img = load_image(robot_num=robot_num, width=width, height=height, quality=quality, a=k)
 
             print("loading: ", time.time() - t)
 
             #Получем визуальные признаки с изображения
-            signs = get_vis_signs(img, k).reshape(-1, 3) # 128
+            signs = get_vis_signs(img, k).reshape(-1, shape)
 
             # Получаем глобальные координаты для этих признаков
             update_visual(data, signs, global_vis, vis_keys)
@@ -180,6 +199,7 @@ def main():
 
             # Если есть новые пересечения, обновляем выборку для обучения
             if len(inter_keys) != 0:
+                inter.append(inter_keys)
                 flag_tree = 0
                 update_train(inter_keys, global_speed, global_vis, global_train, global_target)
 
@@ -195,14 +215,17 @@ def main():
                     X = np.array(global_train)
 
                 t = time.time()
-                tree = RandomForestClassifier().fit(X.reshape(-1, 3), y) # 128
-                print('training time: ', time.time() - t)
+                tree = RandomForestClassifier().fit(X.reshape(-1, shape), y)
                 v += 1
-                # print('targets: ', str(target))
+                f = open('texts\\inter.txt', 'a')
+                f.write('\n{}'.format(v) + str(inter))
+                f.close()
+
+                print('training time: ', time.time() - t)
                 f = open('texts\\target.txt', 'a')
                 f.write('\n{}'.format(v) + str(y))
                 f.close()
-                # print('train: ', str(global_train))
+
                 f = open('texts\\train.txt', 'a')
                 f.write('\n{}'.format(v) + str(X))
                 f.close()
@@ -212,12 +235,9 @@ def main():
 
                 flag_tree += 1
             if tree is not None:
-                mass = tree.predict(signs.reshape(-1, 3))# 128
+                mass = tree.predict(signs.reshape(-1, shape))
             else:
-                # f = open('texts\\inter.txt', 'a')
-                # f.write('\n{}'.format(k) + str(inter_keys))
-                # f.close()
-                #
+
                 # # f = open('texts\\vis.txt', 'w')
                 # # f.write(str(vis_keys))
                 # # f.close()
@@ -238,13 +258,7 @@ def main():
                 # f.write('\n{}'.format(k) + str(global_speed))
                 # f.close()
                 k+=1
-            # print(type(global_coord))
-            # if global_coord == 'None':
-            #     raise('Something went wrong')
 
-            #update_train(global_coord, signs)
-            #mass = calculate(robot_num=robot_num, width=width, height=height, quality=quality)
-            # mass = np.random.randint(0, 5, size=(784, 128))
                 mass = np.ones(shape=(784, 128), dtype=np.int32) + 1
             post_answer(mass)
             change_status('True')
