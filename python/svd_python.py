@@ -9,12 +9,15 @@ import time
 import keras
 import operator
 import numpy as np
+from threading import Thread
+from selenium import webdriver
 import keras.applications as zoo
 from PIL import Image, ImageFilter
 from sklearn.externals import joblib
 from tqdm import tqdm_notebook as tqn
 from collections import Counter, defaultdict
 from sklearn.ensemble import RandomForestClassifier
+from selenium.webdriver.chrome.options import Options
 
 keras.backend.set_learning_phase(0)
 def init_keras_model():
@@ -32,6 +35,37 @@ def init_keras_model():
     return headless
 
 model = init_keras_model()
+
+class LoopThread(Thread):
+
+    def __init__(self, name, num, driver):
+        Thread.__init__(self)
+        self.name = name
+        self.number = num
+        self.driver = driver
+
+    def run(self):
+        print('i am working')
+        while(True):
+            self.driver.get("http://192.168.88.%i:8080/stream?topic=/camera/rgb/image_raw&width=224&height=224&quality=150" %(self.number))
+            try:
+                req = requests.get('http://127.0.0.1:5000/new_image/')
+            except:
+                break
+        f = open('./died.txt', 'w')
+        f.write('i am died')
+        f.close()
+
+def create_driver(number=21):
+    chrome_options = Options()
+    chrome_options.add_argument("--headless")
+    chrome_options.add_argument("--window-size=224x224")
+
+    chrome_driver = os.getcwd() +"\\chromedriver.exe"
+    driver = webdriver.Chrome(chrome_options=chrome_options, executable_path=chrome_driver)
+    name = 'loop thread'
+    my_thread = LoopThread(name, number, driver)
+    my_thread.start()
 
 class Requester:
     def __init__(self):
@@ -111,6 +145,7 @@ def load_image(robot_num=25, width=224, height=224, quality=150, path_img=None, 
                  %(int(robot_num), int(width), int(height), int(quality)))
         _, img = cap.read()
     if mode == 'bin':
+        cv2.imwrite('./images/img/{}_{}.png'.format(a, a), img)
         img = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
         img[:,:,0] = 0.
         img[:,:,-1] = 255.
@@ -119,14 +154,13 @@ def load_image(robot_num=25, width=224, height=224, quality=150, path_img=None, 
     else:
         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 
-    # cv2.imwrite('./images/img/{}_{}.png'.format(a, a), img)
     return img
 
 def get_vis_signs(img, a, mode='bin'):
     img = Image.fromarray(img)
     a += 1
     img = img.filter(ImageFilter.MedianFilter(size=11))
-    # img.save('./images/img/{}.png'.format(a))
+    img.save('./images/img/{}.png'.format(a))
     if mode == 'bin':
         img = img.resize((28, 28))
         visual_signs = (np.array(img)/255.).copy()
@@ -139,6 +173,7 @@ def get_vis_signs(img, a, mode='bin'):
 
 def main():
     change_status('True')
+    create_driver() # создаем тред, который будет постоянно дергать картинку
     global_vis = defaultdict(list)
     global_speed = defaultdict(list)
     global_target = []
@@ -154,7 +189,7 @@ def main():
     mode = 'bin'
 
     if mode == 'bin':
-        shape = 2
+        shape = 3
     else:
         shape = 128
 
@@ -170,7 +205,8 @@ def main():
                 update_speed(data, global_speed, speed_keys)
                 ind += 1
                 f = open('texts\\speed.txt', 'w')
-                f.write(str(global_speed))
+                for speed in global_speed.keys():
+                    f.write(str(speed) + ":" + str(global_speed[speed]) + '\n')
                 f.close()
         # если шарп готов к получению картинки, получаем её и обрабатываем
         if data['image'] == 'True':
@@ -182,8 +218,8 @@ def main():
             quality = int(data['height'])
 
             t = time.time()
-            img = load_image(path_img='./mirea_images/real_images/V01-14-19-1419.jpg')
-            #img = load_image(robot_num=robot_num, width=width, height=height, quality=quality, a=k)
+            # img = load_image(path_img='./mirea_images/real_images/V01-14-19-1419.jpg')
+            img = load_image(robot_num=robot_num, width=width, height=height, quality=quality, a=k)
 
             print("loading: ", time.time() - t)
 
@@ -215,7 +251,8 @@ def main():
                     X = np.array(global_train)
 
                 t = time.time()
-                tree = RandomForestClassifier().fit(X.reshape(-1, shape), y)
+                print(X.shape, y.shape)
+                tree = RandomForestClassifier(class_weight='balanced').fit(X.reshape(-1, shape), y)
                 v += 1
                 f = open('texts\\inter.txt', 'a')
                 f.write('\n{}'.format(v) + str(inter))
@@ -242,14 +279,9 @@ def main():
                 # # f.write(str(vis_keys))
                 # # f.close()
                 #
-                # f = open('texts\\middle_vis.txt', 'w')
-                # for i in vis_keys:
-                #     if i[0] in (-1, -2, 0, 1, 2):
-                #         f.write(str(i) + "\n")
-                # f.close()
                 #
-                with open('data.pickle', 'wb') as f:
-                    pickle.dump(global_vis, f)
+                # with open('data.pickle', 'wb') as f:
+                #     pickle.dump(global_vis, f)
                 # f = open('texts\\vis_cor.txt', 'w')
                 # f.write(str(global_vis))
                 # f.close()
@@ -260,6 +292,11 @@ def main():
                 k+=1
 
                 mass = np.ones(shape=(784, 128), dtype=np.int32) + 1
+            f = open('texts\\middle_vis.txt', 'w')
+            for i in vis_keys:
+                if i[0] in (-1, 0, 1):
+                    f.write(str(i) + "\n")
+            f.close()
             post_answer(mass)
             change_status('True')
 
