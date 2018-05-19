@@ -12,6 +12,10 @@ namespace VRepClient
 {
     public class Network
     {
+        ~Network()
+        {
+            GetNewImage("False");
+        }
         private JObject GET(string url)
         {
             var httpWebRequest = (HttpWebRequest)WebRequest.Create(url);
