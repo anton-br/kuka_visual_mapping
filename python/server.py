@@ -1,11 +1,17 @@
 from flask import Flask
 from flask import request
 import json
-from svd_python import Requester
 
 # ЗАПУСК СЕРВЕРА
 # set FLASK_APP=server.py && flask run
 app = Flask(__name__)
+
+class Requester:
+    def __init__(self):
+        self.ready = None
+        self.image = None
+        self.pred_mask = None
+
 req = Requester()
 
 @app.route('/ready/', methods=['GET', 'POST'])
@@ -33,8 +39,7 @@ def new_val():
         req.pred_mask = json.dumps(data)
         return json.dumps(data)
     else:
-        mask = req.pred_mask
-        return mask
+        return req.pred_mask
 
 @app.route('/new_image/', methods=['GET', 'POST'])
 def new_img():
@@ -44,8 +49,7 @@ def new_img():
         req.image = json.dumps(data)
         return json.dumps(data)
     else:
-        image = req.image
-        return image
+        return req.image
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    app.run(debug=False)

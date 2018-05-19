@@ -19,6 +19,10 @@ from collections import Counter, defaultdict
 from sklearn.ensemble import RandomForestClassifier
 from selenium.webdriver.chrome.options import Options
 
+# TODO 1. Стопорь роботоа и регулируй камеру! +
+# 2. Проверить правильность сборки массива для обучения.
+# 3. Надо поддреживать репрезентативность выборки, чтобы дерево не предсказывало для всего нули (как стандартную поверхность перемещения).
+# 4. Облако точек
 keras.backend.set_learning_phase(0)
 def init_keras_model():
     model = zoo.MobileNet(include_top=True, weights='imagenet')
@@ -35,12 +39,6 @@ def init_keras_model():
     return headless
 
 model = init_keras_model()
-
-class Requester:
-    def __init__(self):
-        ready = None
-        image = None
-        pred_mask = None
 
 def change_status(status='True'):
     #питон готов принимать новую картинку, если status=True, иначе не готов
@@ -72,6 +70,9 @@ def update_visual(data, signs, global_vis, vis_keys):
 def update_train(inter_keys, global_speed, global_vis, global_train, global_target):
     target = np.array(operator.itemgetter(*inter_keys)(global_speed))
     train = np.array(operator.itemgetter(*inter_keys)(global_vis))
+    if len(inter_keys) > 1:
+        target = np.array(list(target) + [None])[:-1]
+        train = np.array(list(train) + [None])[:-1]
     print('before: ', train.shape, inter_keys, target)
     if isinstance(target[0], (list, np.ndarray)):
         target_list = []
@@ -96,7 +97,7 @@ def update_train(inter_keys, global_speed, global_vis, global_train, global_targ
         if len(train.shape) > 1:
             num = [tar] * train.shape[0]
         else:
-            num = [tar]*len(train[i]) if isinstance(train[i], list) else [tar]
+            num = [tar]*len(train[i]) if isinstance(train[i], (list, np.ndarray)) else [tar]
         target_new.append(num)
     if len(train.shape) == 1:
         train = np.concatenate(train)
@@ -241,13 +242,14 @@ def main():
                 f.close()
 
                 print('training time: ', time.time() - t)
-                f = open('texts\\target.txt', 'a')
-                f.write('\n{}'.format(data_counter) + str(y))
+                f = open('texts\\training_data.txt', 'w')
+                for y_data, x_data in zip(y, X):
+                    f.write('ans: ' + str(y_data) + '\n' + 'tr: ' + str(x_data) + '\n')
                 f.close()
 
-                f = open('texts\\train.txt', 'a')
-                f.write('\n{}'.format(data_counter) + str(X))
-                f.close()
+                # f = open('texts\\train.txt', 'w')
+                # f.write('\n{}'.format(data_counter) + str(X))
+                # f.close()
 
                 vis_keys = vis_keys - inter_keys
                 speed_keys = speed_keys - inter_keys
@@ -272,16 +274,16 @@ def main():
                 # f.write('\n{}'.format(k) + str(global_speed))
                 # f.close()
 
-                mass = np.ones(shape=(784, 128), dtype=np.int32) + 1
-            mid = []
-            f = open('texts\\middle_vis.txt', 'a')
-            for i in vis_keys:
-                if i[0] in (-1, 0, 1):
-                    mid.append(i)
-            mid = sorted(mid, key=lambda x: x[0])
-            for i in mid:
-                f.write(str(i) + '\n')
-            f.close()
+                mass = np.ones(shape=(784, 128), dtype=np.int32)
+            # mid = []
+            # f = open('texts\\middle_vis.txt', 'a')
+            # for i in vis_keys:
+            #     if i[0] in (-1, 0, 1):
+            #         mid.append(i)
+            # mid = sorted(mid, key=lambda x: x[0])
+            # for i in mid:
+            #     f.write(str(i) + '\n')
+            # f.close()
             post_answer(mass)
             change_status('True')
 
