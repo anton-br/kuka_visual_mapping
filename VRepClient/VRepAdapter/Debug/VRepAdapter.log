@@ -11,6 +11,6 @@ extApiPlatform.cpp(232): warning C4996: 'fopen': This function or variable may b
   C:\Program Files (x86)\Windows Kits\10\Include\10.0.10240.0\ucrt\stdio.h(205): note: see declaration of 'fopen'
   Generating Code...
   .NETFramework,Version=v4.5.2.AssemblyAttributes.cpp
-     Creating library C:\Users\Anton\Desktop\diplom\VRepClient\Debug\VRepAdapter.lib and object C:\Users\Anton\Desktop\diplom\VRepClient\Debug\VRepAdapter.exp
-  VRepAdapter.vcxproj -> C:\Users\Anton\Desktop\diplom\VRepClient\Debug\VRepAdapter.dll
-  VRepAdapter.vcxproj -> C:\Users\Anton\Desktop\diplom\VRepClient\Debug\VRepAdapter.pdb (Full PDB)
+     Creating library C:\Users\Anton\Desktop\diplom\VRepClient(permeability)\Debug\VRepAdapter.lib and object C:\Users\Anton\Desktop\diplom\VRepClient(permeability)\Debug\VRepAdapter.exp
+  VRepAdapter.vcxproj -> C:\Users\Anton\Desktop\diplom\VRepClient(permeability)\Debug\VRepAdapter.dll
+  VRepAdapter.vcxproj -> C:\Users\Anton\Desktop\diplom\VRepClient(permeability)\Debug\VRepAdapter.pdb (Full PDB)
