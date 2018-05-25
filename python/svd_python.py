@@ -5,24 +5,50 @@ import requests
 
 import pickle
 import cv2
-import time
+from time import time
 import keras
 import operator
 import numpy as np
+from multiprocessing import Queue
 from threading import Thread
-from selenium import webdriver
+from sklearn.externals import joblib
 import keras.applications as zoo
 from PIL import Image, ImageFilter
 from sklearn.externals import joblib
 from tqdm import tqdm_notebook as tqn
 from collections import Counter, defaultdict
 from sklearn.ensemble import RandomForestClassifier
-from selenium.webdriver.chrome.options import Options
 
 # TODO 1. Стопорь роботоа и регулируй камеру! +
 # 2. Проверить правильность сборки массива для обучения.
 # 3. Надо поддреживать репрезентативность выборки, чтобы дерево не предсказывало для всего нули (как стандартную поверхность перемещения).
 # 4. Облако точек
+
+queue = []
+class LoopThread(Thread):
+
+    def __init__(self, name, cap):
+        Thread.__init__(self)
+        self.name = name
+        self.cap = cap
+
+    def run(self):
+        print('i am working')
+        global queue
+        while(True):
+            _, img = self.cap.read()
+            queue.append(img)
+            try:
+                req = requests.get('http://127.0.0.1:5000/new_image/')
+            except:
+                break
+
+def create_driver(number, cap):
+    name = 'loop_thread'
+    my_thread = LoopThread(name, cap)
+    my_thread.start()
+    return my_thread
+
 keras.backend.set_learning_phase(0)
 def init_keras_model():
     model = zoo.MobileNet(include_top=True, weights='imagenet')
@@ -39,7 +65,6 @@ def init_keras_model():
     return headless
 
 model = init_keras_model()
-
 def change_status(status='True'):
     #питон готов принимать новую картинку, если status=True, иначе не готов
     ready = {'ready': status}
@@ -77,11 +102,11 @@ def update_train(inter_keys, global_speed, global_vis, global_train, global_targ
     if isinstance(target[0], (list, np.ndarray)):
         target_list = []
         for tar in target:
-            w = np.where(np.array(tar)>0.08)[0]
+            w = np.where(np.array(tar)>0.099)[0]
             if len(w) == 0: # когда скорость 0, у данной точки будет класс - 2, что наверное не правильно, тк 0 быть не может вообще
                 target_list.append(0)
             else:
-                target_list.append(np.mean(np.array(tar)[w]))
+                target_list.append(np.min(np.array(tar)[w]))
         target = np.array(target_list)
     else:
         target = np.array([np.mean(target)])
@@ -113,8 +138,8 @@ def load_image(cap=None, robot_num=25, width=224, height=224, quality=150, path_
     else:
         _, img = cap.read()
     if mode == 'bin':
-        cv2.imwrite('./images/img/{}_{}.png'.format(image_counter, image_counter), img)
         print(image_counter)
+        cv2.imwrite('./images/img/{}_{}.png'.format(image_counter, image_counter), img)
         img = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
         img[:,:,0] = 0.
         img[:,:,-1] = 255.
@@ -150,6 +175,7 @@ def update_floder():
 def main():
     change_status('True')
     update_floder()
+    global queue
     global_vis = defaultdict(list)
     global_speed = defaultdict(list)
     global_target = []
@@ -185,37 +211,63 @@ def main():
                 for speed in global_speed.keys():
                     f.write(str(speed) + ":" + str(global_speed[speed]) + '\n')
                 f.close()
-        # если шарп готов к получению картинки, получаем её и обрабатываем
-        if data['image'] == 'True':
-            change_status('False')
-
-            robot_num = int(data['robot_num'])
-            width = int(data['width'])
-            height = int(data['height'])
-            quality = int(data['height'])
-
-            t = time.time()
-            # img = load_image(path_img='./mirea_images/real_images/V01-14-19-1419.jpg')
+        try:
             if first:
+                robot_num = int(data['robot_num'])
+                width = int(data['width'])
+                height = int(data['height'])
+                quality = int(data['height'])
+            # img = load_image(path_img='./mirea_images/real_images/V01-14-19-1419.jpg')
                 cap = cv2.VideoCapture('http://192.168.88.%i:8080/stream?topic=/camera/rgb/image_raw&width=%i&height=%i&quality=%i'
                          %(int(robot_num), int(width), int(height), int(quality)))
                 for i in range(15):
                     _ = cap.read()
-                    first = False
-            img = load_image(cap, robot_num=robot_num, width=width, height=height, quality=quality, image_counter=image_counter)
+                thread = create_driver(21, cap)
+                first = False
 
-            print("loading: ", time.time() - t)
+        except:
+            pass
+        # если шарп готов к получению картинки, получаем её и обрабатываем
+        if data['image'] == 'True':
+            change_status('False')
+
+            t = time()
+            if len(queue) == 0:
+                continue
+            img = queue.pop()
+            #print('len queue: ', len(queue))
+            cv2.imwrite('./images/img/{}_{}.png'.format(image_counter, image_counter), img)
+            img = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+            img[:,:,0] = 0.
+            img[:,:,-1] = 255.
+            img[:,:,1] = np.array([0. if i < 100. else 255. for i in img[:,:,1].ravel()]).reshape(224, 224)
+            img = cv2.cvtColor(img, cv2.COLOR_HSV2BGR)
+            #img = load_image(cap, robot_num=robot_num, width=width, height=height, quality=quality, image_counter=image_counter)
+
+            print("loading: ", time() - t)
 
             #Получем визуальные признаки с изображения
             signs = get_vis_signs(img, image_counter).reshape(-1, shape)
+
+            t = time()
             image_counter += 1
             # Получаем глобальные координаты для этих признаков
             update_visual(data, signs, global_vis, vis_keys)
 
+            #print('time update: ', time() - t)
+            t = time()
+            # joblib.dump(global_vis, 'global.pkl')
+            # f = open('texts\\signs.txt', 'w')
+            # q = 0
+            # for keys, item in global_vis.items():
+            #     f.write(str(keys) + " : " + str(item) + '\n')
+            #     q+=1
+            # f.close()
+            # print('time to dump: ', time() - t)
             # Ищем пересечения между инфой о скорости и визуальными признаками
             inter_keys = vis_keys & speed_keys
             print("Num inter: ", len(inter_keys))
-
+            #print('time write: ', time() - t)
             # Если есть новые пересечения, обновляем выборку для обучения
             if len(inter_keys) != 0:
                 inter.append(inter_keys)
@@ -233,20 +285,30 @@ def main():
                     print("can't concatenate train")
                     X = np.array(global_train)
 
-                t = time.time()
-                print(X.shape, y.shape)
+                t = time()
+                ones = list(X[np.where(y == 1)[0][-500:]])
+                two = list(X[np.where(y == 2)[0][-500:]])
+                X = np.array(ones + two)
+                y = np.array([1] * len(ones) + [2] * len(two))
+                np.savetxt('X', X)
+                np.savetxt('y', y)
+                np.random.seed(10)
+                np.random.shuffle(X)
+                np.random.seed(10)
+                np.random.shuffle(y)
+
                 tree = RandomForestClassifier(class_weight='balanced').fit(X.reshape(-1, shape), y)
                 data_counter += 1
-                f = open('texts\\inter.txt', 'a')
-                f.write('\n{}'.format(data_counter) + str(inter))
-                f.close()
+                # f = open('texts\\inter.txt', 'a')
+                # f.write('\n{}'.format(data_counter) + str(inter))
+                # f.close()
+                #
 
-                print('training time: ', time.time() - t)
                 f = open('texts\\training_data.txt', 'w')
                 for y_data, x_data in zip(y, X):
                     f.write('ans: ' + str(y_data) + '\n' + 'tr: ' + str(x_data) + '\n')
                 f.close()
-
+                print('training time: ', time() - t)
                 # f = open('texts\\train.txt', 'w')
                 # f.write('\n{}'.format(data_counter) + str(X))
                 # f.close()
@@ -257,6 +319,10 @@ def main():
                 flag_tree += 1
             if tree is not None:
                 mass = tree.predict(signs.reshape(-1, shape))
+                a = signs.reshape(-1, shape)[:,0].copy()
+                print('two: ', len(np.where(a == 0.)[0]), 'mass: ', len(mass))
+                a[a==0] = 2
+                print("tree acc: ", len(np.where(a == mass)[0]), " / ",  len(mass))
             else:
 
                 # # f = open('texts\\vis.txt', 'w')
@@ -274,7 +340,7 @@ def main():
                 # f.write('\n{}'.format(k) + str(global_speed))
                 # f.close()
 
-                mass = np.ones(shape=(784, 128), dtype=np.int32)
+                mass = np.ones(shape=(784, 1), dtype=np.int32)
             # mid = []
             # f = open('texts\\middle_vis.txt', 'a')
             # for i in vis_keys:
@@ -284,8 +350,9 @@ def main():
             # for i in mid:
             #     f.write(str(i) + '\n')
             # f.close()
-            post_answer(mass)
+            post = signs.reshape(-1, shape)[:,0].astype(np.int32)
+            post[post == 0] = 2
+            post_answer(post)
             change_status('True')
-
 if __name__ == "__main__":
     sys.exit(main())
