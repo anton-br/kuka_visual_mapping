@@ -75,7 +75,7 @@ namespace VRepClient
             {
                 try
                 {
-#warning ограничить длительность попытки подключения
+//#warning ограничить длительность попытки подключения
                     tc.Connect(serverEndPoint);
                 }
                 catch (Exception)

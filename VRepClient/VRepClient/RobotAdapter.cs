@@ -1,6 +1,5 @@
 ﻿// VRep-YouBot Adapter, Margolin Ilan (MIREA 2016)
 using System;
-using System.IO;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
@@ -13,20 +12,18 @@ namespace VRepClient
 {
     public class RobotAdapter
     {
-        public virtual void Init() { }
-        public virtual void Deactivate() { }
+        public virtual void Init(){}
+        public virtual void Deactivate(){}
         public virtual void Send(Drive RobDrive) { }//отправка управляющих команд
         public virtual void ReceiveLedData(string LedarData) { } /*получение данных ледара и закидывание их в массив*/
         public virtual void ReceiveOdomData(string OdometryData) { }//получение данных одометрии и закидывание их в массив
 
-        public System.IO.StreamWriter stream;
-
-        public float[] RobotLedData;
-        public float[] RobotOdomData;//данные с одометрии
+        public float[] RobotLedData;//сюда заносятся данные с ледара Врепа
+        public float[] RobotOdomData;//сюда заносятся данные одометри Врепа
 
         public float right;
         public float left;
-
+               
     }
 
     public class VrepAdapter : RobotAdapter //наследный класс для работы с Vrep
@@ -36,8 +33,8 @@ namespace VRepClient
         float driveBackStartTime = -99000;
         float[] motorSpeeds = new float[4];
 
-
-        public override void Init()
+      
+        public override void Init() 
         {
             clientID = VRepFunctions.Start("127.0.0.1", 7777);
             if (clientID != -1)
@@ -56,15 +53,15 @@ namespace VRepClient
             if (RobDrive != null)
             {
                 right = RobDrive.right * (-5f);//20.02 удалет тип var//*(-2.5f);
-                left = RobDrive.left * (-5f);
-                //right = 0;//для проверки
-                //  left = 0;
+                 left = RobDrive.left * (-5f);
+                 //right = 0;//для проверки
+              //  left = 0;
             }
             if (VRepFunctions.GetConnectionId(clientID) == -1) return;
 
             Byte sensorTrigger = (Byte)0;
-
-
+            
+                   
             int simulationTime = VRepFunctions.GetLastCmdTime(clientID);//??????
             if (simulationTime - driveBackStartTime < 3000)
                 driveBackStartTime = simulationTime;
@@ -77,38 +74,42 @@ namespace VRepClient
         }
         public override void ReceiveLedData(string LedarData)
         { /* парсинг строки из Vrep "0.3, 0.1, -0.7" *//* base.Recieve("0.3, 0.1, +0.7");*/
-            RobotLedData = new float[518];//более 1412 это бесконечность
-            float[,] LaserDatatemporaryVrep;//временный массив с координатами видимых препядствий
-            string g = LedarData;
-            LaserDatatemporaryVrep = new float[684, 3];
-            if (g != "")
-            {
-                string someString = LedarData;
-                string[] words = someString.Split(new char[] { ';' });// words
-                int h = 0;//вспомогательная переменная для преодразоания str в массиив
+         RobotLedData = new float[518];//более 1412 это бесконечность
+         float[,] LaserDatatemporaryVrep;//временный массив с координатами видимых препядствий
+         string g = LedarData;
+         LaserDatatemporaryVrep = new float[684, 3];
+         if (g != "")
+         {
+             string someString = LedarData;
+             string[] words = someString.Split(new char[] { ';' });// words
+             int h = 0;//вспомогательная переменная для преодразоания str в массиив
+             
+             for (int i = 0; i < 684; i++)//записываем данные с ледара в двухмерный массив 683 на 3, в сроках x y z
+             {
+                 for (int j = 0; j < 3; j++)
+                 {
+                     LaserDatatemporaryVrep[i, j] = float.Parse(words[h], System.Globalization.CultureInfo.CreateSpecificCulture("en-US"));
+                     if (LaserDatatemporaryVrep[i, j] == 0) { LaserDatatemporaryVrep[i, j] = 500; }
+                     h++;
+                 }
+             }
 
-                for (int i = 0; i < 684; i++)//записываем данные с ледара в двухмерный массив 683 на 3, в сроках x y z
-                {
-                    for (int j = 0; j < 3; j++)
-                    {
-                        LaserDatatemporaryVrep[i, j] = float.Parse(words[h], System.Globalization.CultureInfo.CreateSpecificCulture("en-US"));
-                        if (LaserDatatemporaryVrep[i, j] == 0) { LaserDatatemporaryVrep[i, j] = 500; }
-                        h++;
-                    }
-                }
+             int d=0;
+             for (int i = 83; i < 601; i++) //в массив LaserDataVrep, длиной 516 высчитываем и добавляем расстояния до объектов
+             {
+                 RobotLedData[d] = (float)(Math.Sqrt(LaserDatatemporaryVrep[i, 0] * LaserDatatemporaryVrep[i, 0] + LaserDatatemporaryVrep[i, 1] * LaserDatatemporaryVrep[i, 1]));
+                 d++;
+             }
 
-                int d = 0;
-                for (int i = 83; i < 601; i++) //в массив LaserDataVrep, длиной 516 высчитываем и добавляем расстояния до объектов
-                {
-                    RobotLedData[d] = (float)(Math.Sqrt(LaserDatatemporaryVrep[i, 0] * LaserDatatemporaryVrep[i, 0] + LaserDatatemporaryVrep[i, 1] * LaserDatatemporaryVrep[i, 1]));
-                    d++;
-                }
-            }
 
+           
+
+         }
+            
         }
-        public override void ReceiveOdomData(string OdometryData)
+        public override void ReceiveOdomData(string OdometryData) 
         {
-            RobotOdomData = new float[4];
+            RobotOdomData = new float[3];
             if (OdometryData != "")
             {
                 // string someString = RobPos;
@@ -118,11 +119,11 @@ namespace VRepClient
                     RobotOdomData[i] = float.Parse(words[i], System.Globalization.CultureInfo.CreateSpecificCulture("en-US"));
 
                 }
-
+              
                 //textBox2.Text = h;
                 //    RobLocDataKuka[2] = RobLocDataKuka[2] * -1;//
             }
-
+        
         }
 
         public override void Deactivate()
@@ -134,8 +135,7 @@ namespace VRepClient
     public class YoubotAdapter : RobotAdapter //наследный класс для работы с Kuka Youbot
     {
         public TcpConnection tc;
-        //public Network net;
-        public void TCPconnect(string ip)
+        public void TCPconnect(string ip) 
         {
             tc = new TcpConnection(0, Form1.f1,
                    str => MessageBox.Show("Connected!"),
@@ -155,12 +155,12 @@ namespace VRepClient
         {
             if (str.StartsWith(".laser#"))
             {
-                //int ind = str.IndexOf("#");
-                //var LedData = str.Substring(ind + 1);
+                int ind = str.IndexOf("#");
+                var LedData = str.Substring(ind + 1);
 
-                //Form1.f1.ShowLedData(LedData);
-                ////KukaPotField.LedDataKuka(s);//отправляем данные с лудара куки
-                //ReceiveLedData(LedData); //отправляем данные с ледара
+                Form1.f1.ShowLedData(LedData);
+                //KukaPotField.LedDataKuka(s);//отправляем данные с лудара куки
+                ReceiveLedData(LedData); //отправляем данные с ледара
             }
             if (str.Contains(".odom#"))
             {
@@ -178,7 +178,7 @@ namespace VRepClient
             }
 
         }
-        public override void Send(Drive RobDrive)
+        public override void Send(Drive RobDrive) 
         {
             if (RobDrive != null)
             {
@@ -188,69 +188,67 @@ namespace VRepClient
             if (tc != null)// здесь происходит отправка задающих команд на куку
             {
                 string control_str;
-                control_str = string.Format("LUA_Base({0}, {1}, {2})", 0, 0, 0);
-                float Vrob = (right + left) / 2;
-                float Wrob = (right - left) / 1;
-                var speed = 0f; // скорость робота!!
-                                  //var k_slow = 0.1f;
-                var arg1 = Vrob; arg1 = (float)Math.Max(-speed, Math.Min(arg1, speed));//надо переделать эти выводы для адекватного вывода
-                var arg2 = 0;
-                var arg3 = Wrob; arg3 = Math.Max(-speed, Math.Min(arg3, speed));//возможно(left-right)
-                control_str = string.Format(CultureInfo.InvariantCulture, "LUA_Base({0}, {1}, {2})", arg1, arg2, arg3);
-
+                 control_str = string.Format( "LUA_Base({0}, {1}, {2})", 0, 0, 0);
+                 float Vrob = (right + left) / 2;
+                 float Wrob = (right - left) / 1;
+                 var speed = 0.1f;
+                 //var k_slow = 0.1f;
+                 var arg1 = Vrob; arg1 = (float)Math.Max(-speed, Math.Min(arg1, speed));//надо переделать эти выводы для адекватного вывода
+                 var arg2 = 0;
+                 var arg3 = Wrob; arg3 = Math.Max(-speed, Math.Min(arg3, speed));//возможно(left-right)
+                 control_str = string.Format(CultureInfo.InvariantCulture, "LUA_Base({0}, {1}, {2})", arg1, arg2, arg3);
+            
                 // var b = KukaPotField.ObstDistKuka(KukaPotField.LaserDataKuka, KukaPotField.RobLocDataKuka);
                 //if (b)
                 //{
-                if (control_str != null) tc.Send(control_str);//отправляем команду на сервер куки
+                   if (control_str != null) tc.Send(control_str);//отправляем команду на сервер куки
                 //    }
             }
             /*youbot_connection.send(ToString(data));*/
         }
-        public override void ReceiveLedData(string LedarData)
+        public override void ReceiveLedData(string LedarData) 
         { /* парсинг строки из Vrep "0.3, 0.1, -0.7" *//*base.Recieve("0.3, 0.1, +0.7"); */
-
+                        
             string g = LedarData;
-
-            // float[] LaserDataKuka;
+            
+           // float[] LaserDataKuka;
             if (g != "")
             {
                 string someString = LedarData;
                 string[] words = someString.Split(new char[] { ';' });// words
                 int h = 0;//вспомогательная переменная для преобразоания str в массиив
 
-                // LaserDataKuka = new float[words.Length];
+               // LaserDataKuka = new float[words.Length];
                 RobotLedData = new float[words.Length];
                 for (int i = 0; i < words.Length; i++)//записываем данные с ледара в массив, в сроках x y z
                 {
                     RobotLedData[i] = float.Parse(words[h], System.Globalization.CultureInfo.CreateSpecificCulture("en-US"));
                     h++;
                 }
-            }
+             }
 
         }
-        public override void ReceiveOdomData(string OdometryData)
+        public override void ReceiveOdomData(string OdometryData) 
         {
-            int len = 5;// длина будущего массива с одометрией
-            RobotOdomData = new float[len];
+            RobotOdomData = new float[4];
             if (OdometryData != "")
             {
                 // string someString = RobPos;
                 string[] words = OdometryData.Split(new char[] { ';' });//парсим строку в массив words
-                for (int i = 0; i < len - 1; i++)
+                for (int i = 0; i < 4; i++)
                 {
                     RobotOdomData[i] = float.Parse(words[i], System.Globalization.CultureInfo.CreateSpecificCulture("en-US"));
-
+                    
                 }
                 float alpha = RobotOdomData[0];
-
-                RobotOdomData[0] = RobotOdomData[1];
-                RobotOdomData[1] = alpha;
-                //RobotOdomData[len - 2] = (int)(DateTime.UtcNow - new DateTime(1970, 1, 1)).TotalSeconds; // для сравнения времени получения глобальных координат и изображения
-                // ЗАСТАВИТЬ ПОЛУЧАТЬ ТУТ ЖЕ РАССТОЯНИЯ ДО ПИКСЕЛЕЙ
+                
+                 RobotOdomData[0] = RobotOdomData[1];
+                 RobotOdomData[1] = alpha;
             }
         }
         public override void Deactivate()
         {
+
             if (tc != null) tc.Disconnect("form closing", false);
         }
     }

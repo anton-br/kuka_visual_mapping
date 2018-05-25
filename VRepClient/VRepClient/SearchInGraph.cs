@@ -112,7 +112,7 @@ namespace VRepClient
                         {
                             if (point.Y + k > 0 && point.Y + k < field.GetLength(1))
                             {
-                                if (field[point.X + i, point.Y + k] < 3)
+                                if (field[point.X + i, point.Y + k] == 1)
                                 {
                                     freeNode++;
                                 }
@@ -124,10 +124,10 @@ namespace VRepClient
                 // continue;
                 float weight;
                 if (pathNode.Position.X != point.X && pathNode.Position.Y != point.Y)//диагональные смещения стоят 1,4 а прямые 1
-                    weight = field[point.X, point.Y] * 1.4f;
+                    weight = 1.4f;
                 else
-                    weight = field[point.X, point.Y];
-                if ((field[point.X, point.Y] < 3) && freeNode == 49)// 49 это 
+                    weight = 1;
+                if ((field[point.X, point.Y] < 2) && freeNode == 49)
                 {
                     //зополняем данные для точки маршрута
                     var neighbourNode = new PathNode()

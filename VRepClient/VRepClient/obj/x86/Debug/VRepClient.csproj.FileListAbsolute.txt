@@ -249,16 +249,3 @@ C:\Users\Anton\Desktop\diplom\VRepClient\VRepClient\obj\x86\Debug\VRepClient.For
 C:\Users\Anton\Desktop\diplom\VRepClient\VRepClient\obj\x86\Debug\VRepClient.MapForm.resources
 C:\Users\Anton\Desktop\diplom\VRepClient\VRepClient\obj\x86\Debug\VRepClient.Properties.Resources.resources
 C:\Users\Anton\Desktop\diplom\VRepClient\VRepClient\obj\x86\Debug\VRepClient.csproj.GenerateResource.Cache
-C:\Users\Anton\Desktop\diplom\VRepClient(permeability)\VRepClient\bin\Debug\VRepClient.exe.config
-C:\Users\Anton\Desktop\diplom\VRepClient(permeability)\VRepClient\obj\x86\Debug\VRepClient.exe
-C:\Users\Anton\Desktop\diplom\VRepClient(permeability)\VRepClient\obj\x86\Debug\VRepClient.pdb
-C:\Users\Anton\Desktop\diplom\VRepClient(permeability)\VRepClient\bin\Debug\VRepClient.exe
-C:\Users\Anton\Desktop\diplom\VRepClient(permeability)\VRepClient\bin\Debug\VRepClient.pdb
-C:\Users\Anton\Desktop\diplom\VRepClient(permeability)\VRepClient\bin\Debug\VRepAdapter.dll
-C:\Users\Anton\Desktop\diplom\VRepClient(permeability)\VRepClient\bin\Debug\VRepAdapter.pdb
-C:\Users\Anton\Desktop\diplom\VRepClient(permeability)\VRepClient\obj\x86\Debug\VRepClient.csprojResolveAssemblyReference.cache
-C:\Users\Anton\Desktop\diplom\VRepClient(permeability)\VRepClient\obj\x86\Debug\VRepClient.Form1.resources
-C:\Users\Anton\Desktop\diplom\VRepClient(permeability)\VRepClient\obj\x86\Debug\VRepClient.Properties.Resources.resources
-C:\Users\Anton\Desktop\diplom\VRepClient(permeability)\VRepClient\obj\x86\Debug\VRepClient.csproj.GenerateResource.Cache
-C:\Users\Anton\Desktop\diplom\VRepClient(permeability)\VRepClient\bin\Debug\Newtonsoft.Json.dll
-C:\Users\Anton\Desktop\diplom\VRepClient(permeability)\VRepClient\bin\Debug\Newtonsoft.Json.xml
