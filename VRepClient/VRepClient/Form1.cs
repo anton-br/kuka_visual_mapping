@@ -60,11 +60,14 @@ namespace VRepClient
 
         }
         public int counter = 0;
-
+        public int ind = 0;
         private void timer1_Tick(object sender, EventArgs e)
         {
             if (net != null)
+            {
                 net.GetNewImage("False");
+                //net.Restart("False");
+            }
             PaintEventArgs p = new PaintEventArgs(pictureBox1.CreateGraphics(), pictureBox1.Bounds); //Компонент на котором нужно рисовать и область на которой нужно рисовать
             pictureBox1_Paint(sender, p);
             if (ra is VrepAdapter)
@@ -81,6 +84,7 @@ namespace VRepClient
             if (ra != null)
             {
                 ra.Send(RobDrive);
+                //ra.SendVrep(2f, -2f);
             }
 
             if (RobDrive != null & ra != null && SQ != null)//отправка одометрии в экземпляр класса drive
@@ -91,7 +95,8 @@ namespace VRepClient
                     //    map.FillNewPerm();
                 }
 
-                map.GlobListToGraph(map.GlobalMapList, map.RobOdData);
+                map.graph = net.GetGraph(ra.RobotOdomData, map.graph);
+                //map.GlobListToGraph(map.GlobalMapList, map.RobOdData);
                 float GoalPointX = Convert.ToSingle(textBox8.Text);
                 float GoalPointY = Convert.ToSingle(textBox9.Text);
 
@@ -106,17 +111,18 @@ namespace VRepClient
                     SQ.GetNextPoint(ListPoints, ra.RobotOdomData[0], ra.RobotOdomData[1], ra.RobotOdomData[2], map.Xmax, map.Ymax);
                     RobDrive.GetDrive(ra.RobotOdomData[0], ra.RobotOdomData[1], ra.RobotOdomData[2], SQ.CurrentPointX, SQ.CurrentPointY, map.Xmax, map.Ymax);
                     ra.Send(RobDrive);
+                    //ra.SendVrep(2f, -2f);
+                    //ra.Sendmaf("LUA_Base(0, 0, 0.1)");
                 }
 
-                if (net.PythonIsReady())
-                {
-                    net.GetNewImage("True", map.GlobalValString, map.GlobalOdomString);// отправляем глобальные координаты для всех точек
-                    map.GlobalOdomString = "";
-                    map.FillNewVal(net.GetNewVal());// обновляем массив Val новыми значениями проходимости
-                    net.GetNewImage("False");
-                }
-
-                map.LedDataToList(map.Val, ra.RobotOdomData); // обновление массива GlobalMapList 
+                //if (net.PythonIsReady())
+                //{
+                //    net.GetNewImage("True", map.GlobalValString, map.GlobalOdomString);// отправляем глобальные координаты для всех точек
+                //    map.GlobalOdomString = "";
+                //    map.FillNewVal(net.GetNewVal());// обновляем массив Val новыми значениями проходимости
+                //    net.GetNewImage("False");
+                //}
+                //map.LedDataToList(map.Val, ra.RobotOdomData, ind++); // обновление массива GlobalMapList 
             }
             if (ra != null & RobDrive != null)//вывод переменных из Робот Адаптера на форму
             {
@@ -218,7 +224,7 @@ namespace VRepClient
         private void VrepAdapter_Click(object sender, EventArgs e)
         {
             ra = new VrepAdapter();
-
+            net = new Network();
         }
 
         private void YoubotAdapter_Click(object sender, EventArgs e)
@@ -386,6 +392,22 @@ namespace VRepClient
         private void tb_ip_TextChanged(object sender, EventArgs e)
         {
 
+        }
+
+        private void button3_Click(object sender, EventArgs e)
+        {
+            //ra.Sendmaf("LUA_Base(0.1, 0, 0)");
+            ra.SendVrep(10f, -10f);
+        }
+        private void button4_Click(object sender, EventArgs e)
+        {
+            //ra.Sendmaf("LUA_Base(0, 0, 0.1)");
+            ra.SendVrep(0f, 0f);
+        }
+
+        private void button5_Click(object sender, EventArgs e)
+        {
+            ra.Sendmaf("LUA_Base(0, 0, 0)");
         }
     }
 }

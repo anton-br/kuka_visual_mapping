@@ -4,11 +4,13 @@ import json
 import requests
 
 import pickle
+import vrep
 import cv2
-from time import time
+import time
 import keras
 import operator
 import numpy as np
+from scipy import stats
 from multiprocessing import Queue
 from threading import Thread
 from sklearn.externals import joblib
@@ -186,9 +188,24 @@ def update_floder():
     open('texts\\train.txt', 'a').write('')
     open('texts\\middle_vis.txt', 'w').write('')
 
+def get_image(clientID, v0):
+    err, resolution, bit_image = vrep.simxGetVisionSensorImage(clientID, v0, 0, vrep.simx_opmode_buffer)
+    if err == vrep.simx_return_ok:
+        image_byte_array = Image.fromarray(np.array(bit_image).reshape(224, 224, 3).astype(np.uint8)).tobytes()
+        image_buffer = Image.frombuffer("RGB", (resolution[0], resolution[1]), image_byte_array, "raw", "RGB", 0, 1)
+        image = np.asarray(image_buffer)
+        return image
+
+def load_visual_coord(src='./dist_map.txt'):
+    f = open(src, 'r')
+    coord = f.read()
+    f.close()
+    vis = np.array(coord.split(' '), dtype=np.float32).reshape(-1, 2).astype(np.float32) / 100
+    return vis
+
 def main():
     post_answer(np.array([]))
-    #update_floder()
+    update_floder()
     global queue
     global_vis = defaultdict(list)
     global_speed = defaultdict(list)
@@ -196,6 +213,7 @@ def main():
     global_train = []
     vis_keys = set()
     speed_keys = set()
+    visual_coord = load_visual_coord()
     flag_tree = 0
     first = True
     tree = None # будущее дерево
@@ -210,7 +228,23 @@ def main():
     else:
         shape = 128
 
+    vrep.simxFinish(-1) # just in case, close all opened connections
+    img_save = []
+    clientID = vrep.simxStart(str.encode('127.0.0.1'), 19997, True, True, 5000, 5)
+
+    if clientID!=-1:
+        print ('Connected to remote API server')
+
+        res, v0 = vrep.simxGetObjectHandle(clientID, str.encode('v0'), vrep.simx_opmode_oneshot_wait)
+        res, v1 = vrep.simxGetObjectHandle(clientID, str.encode('v1'), vrep.simx_opmode_oneshot_wait)
+        err, resolution, bit_image = vrep.simxGetVisionSensorImage(clientID, v0, 0, vrep.simx_opmode_streaming)
+        time.sleep(1)
+    else:
+        print('Connected error')
+        vrep.simxFinish(clientID)
+
     while True:
+        global_time = time.time()
         new_img = requests.get("http://127.0.0.1:5000/odom/")#шарп говорит когда начинать обрабатыавть новую картинку
         try:
             data = new_img.json()
@@ -220,22 +254,21 @@ def main():
         if data['data_odom'] == '':
             continue
 
-        try:
-            if first:
-                robot_num = int(data['robot_num'])
-                width = int(data['width'])
-                height = int(data['height'])
-                quality = int(data['height'])
-            # img = load_image(path_img='./mirea_images/real_images/V01-14-19-1419.jpg')
-                cap = cv2.VideoCapture('http://192.168.88.%i:8080/stream?topic=/camera/rgb/image_raw&width=%i&height=%i&quality=%i'
-                         %(int(robot_num), int(width), int(height), int(quality)))
-                for i in range(15):
-                    _ = cap.read()
-                thread = create_driver(25, cap)
-                first = False
+        # robot_num = int(data['robot_num'])
+        # width = int(data['width'])
+        # height = int(data['height'])
+        # quality = int(data['height'])
 
-        except:
-            continue
+        img = get_image(clientID, v0)
+        cv2.imwrite('./images/img/{}_{}.png'.format(image_counter, image_counter), img)
+        img = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+        img[:,:,0] = 0.
+        img[:,:,-1] = 255.
+        img[:,:,1] = np.array([0. if i < 100. else 255. for i in img[:,:,1].ravel()]).reshape(224, 224)
+        img = cv2.cvtColor(img, cv2.COLOR_HSV2BGR)
+        #img = load_image(cap, robot_num=robot_num, width=width, height=height, quality=quality, image_counter=image_counter)
+        image = img.ravel()
+        vrep.simxSetVisionSensorImage(clientID, v1, image, 0, vrep.simx_opmode_oneshot)
 
         odom_val = np.array(data['data_odom'].replace(',', '.').split(' '))
         odom_val = np.array(list(filter(None, odom_val)), dtype=np.float32)
@@ -245,30 +278,18 @@ def main():
         for speed in global_speed.keys():
             f.write(str(speed) + ":" + str(global_speed[speed]) + '\n')
         f.close()
-        # если шарп готов к получению картинки, получаем её и обрабатываем
 
-        if len(queue) == 0:
-            continue
-        img = queue.pop()
-        #print('len queue: ', len(queue))
-        cv2.imwrite('./images/img/{}_{}.png'.format(image_counter, image_counter), img)
-        img = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
-        img[:,:,0] = 0.
-        img[:,:,-1] = 255.
-        img[:,:,1] = np.array([0. if i < 100. else 255. for i in img[:,:,1].ravel()]).reshape(224, 224)
-        img = cv2.cvtColor(img, cv2.COLOR_HSV2BGR)
-        #img = load_image(cap, robot_num=robot_num, width=width, height=height, quality=quality, image_counter=image_counter)
-
-        print("loading: ", time() - t)
-
+        #joblib.dump(visual_coord, 'odom.pkl')
         #Получем визуальные признаки с изображения
         signs = get_vis_signs(img, image_counter).reshape(-1, shape)
 
-        t = time()
         image_counter += 1
-            # Получаем глобальные координаты для этих признаков
+        # Получаем глобальные координаты для этих признаков
         update_visual(odom_val, data['time'], visual_coord, signs, global_vis, vis_keys, ind)
         ind +=1
+        # print(len(global_vis.keys()))
+        # joblib.dump(global_vis, 'global.pkl')
+        # return
         inter_keys = vis_keys & speed_keys
         print("Num inter: ", len(inter_keys))
         if len(inter_keys) != 0:
@@ -326,11 +347,14 @@ def main():
             ymatrix = np.round(Ty).astype(int);
             item = np.array(item)[:,0]
             counter = Counter(item)
-            if counter[0] * 3 < counter[1]:
+            # if item[0] == 0:
+            #     it = 2
+            if counter[0] * 5 < counter[1]:
                 it = 1
             else:
                 it = 2
             graph[int(xmatrix + 90)][int(ymatrix + 90)] = int(it);
         post_answer(graph)
+        print('iter time: ', time.time() - global_time)
 if __name__ == "__main__":
     sys.exit(main())
