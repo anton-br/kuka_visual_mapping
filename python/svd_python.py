@@ -5,7 +5,7 @@ import requests
 
 import pickle
 import cv2
-from time import time
+import time
 import keras
 import operator
 import numpy as np
@@ -39,7 +39,7 @@ class LoopThread(Thread):
             _, img = self.cap.read()
             queue.append(img)
             try:
-                req = requests.get('http://127.0.0.1:5000/new_image/')
+                req = requests.get('http://127.0.0.1:5000/odom/')
             except:
                 break
 
@@ -78,7 +78,7 @@ def post_answer(mass):
     requests.post("http://127.0.0.1:5000/new_val/", json=val_js).json()
 
 def update_speed(odom_val, global_speed, speed_keys):
-    key = tuple(list(map(lambda a: int(a * 10), odom_val[:2])))
+    key = tuple(list(map(lambda a: np.round(a * 10).astype(np.int32), odom_val[:2])))
     global_speed[key].append(odom_val[-1])
     speed_keys.add(key)
 
@@ -90,13 +90,15 @@ def update_visual(odom_val, speed_time, visual_coord, signs, global_vis, vis_key
     # print(odom_val)
     rx = np.cos(odom_val[2])
     ry = np.sin(odom_val[2])
-    odom_val[0] += diff_time * odom_val[-1] * ry
-    odom_val[1] += diff_time * odom_val[-1] * rx
+
+    # odom_val[0] += diff_time * odom_val[-1] * ry
+    # odom_val[1] += diff_time * odom_val[-1] * rx
+
     f = open('./hello/vis_{}.txt'.format(ind), 'w')
     o = open('./hello/odom_{}.txt'.format(ind), 'w')
     for i, coord in enumerate(visual_coord):
-        coord_x = (coord[0] * rx + coord[1] * ry) + odom_val[0]
-        coord_y = (-coord[0] * ry + coord[1] * rx) + odom_val[1]
+        coord_x = (coord[0] * rx - coord[1] * ry) + odom_val[0]
+        coord_y = (coord[0] * ry + coord[1] * rx) + odom_val[1]
         coords = tuple((np.round(coord_x*10).astype(np.int32), np.round(coord_y*10).astype(np.int32)))
         f.write(str(coord[0]) +" "+str(coord[1]) + " " + str(signs[i][0]) + "\n")
         global_vis[coords].append(signs[i])
@@ -186,6 +188,24 @@ def update_floder():
     open('texts\\train.txt', 'a').write('')
     open('texts\\middle_vis.txt', 'w').write('')
 
+def load_point_cloud(src='./../../../Desktop/new_cloud_lazer.npy'):
+    point_cloud = np.load(src)[:,:-1][:-1][::-1]
+    shape = point_cloud.shape[0]
+    if shape < 784:
+        raise Exception('Point cloud have invalid shape. %s < 784.'%shape)
+    delete_num = shape - 784
+    delete_ind = np.random.randint(1, shape-1, delete_num)
+    point_cloud = np.delete(point_cloud, delete_ind, 0)
+    point_cloud = np.array(list(map(lambda a: [a[1], a[0]], point_cloud)))
+    return point_cloud
+
+# def load_visual_coord(src='./dist_map.txt'):
+#     f = open(src, 'r')
+#     coord = f.read()
+#     f.close()
+#     vis = np.array(coord.split(' '), dtype=np.float32).reshape(-1, 2).astype(np.float32) / 100
+#     return vis
+
 def main():
     post_answer(np.array([]))
     #update_floder()
@@ -196,6 +216,7 @@ def main():
     global_train = []
     vis_keys = set()
     speed_keys = set()
+    visual_coord = load_point_cloud()#load_visual_coord()
     flag_tree = 0
     first = True
     tree = None # будущее дерево
@@ -211,6 +232,7 @@ def main():
         shape = 128
 
     while True:
+        global_time = time.time()
         new_img = requests.get("http://127.0.0.1:5000/odom/")#шарп говорит когда начинать обрабатыавть новую картинку
         try:
             data = new_img.json()
@@ -222,10 +244,17 @@ def main():
 
         try:
             if first:
-                robot_num = int(data['robot_num'])
-                width = int(data['width'])
-                height = int(data['height'])
-                quality = int(data['height'])
+                # req_par = requests.get("http://127.0.0.1:5000/new_image/")
+                # params = req_par.json()
+                # robot_num = int(params['robot_num'].split('.')[-1])
+                # width = int(params['width'])
+                # height = int(params['height'])
+                # quality = int(params['height'])
+                robot_num = 21
+                width = 224
+                height = 224
+                quality = 150
+
             # img = load_image(path_img='./mirea_images/real_images/V01-14-19-1419.jpg')
                 cap = cv2.VideoCapture('http://192.168.88.%i:8080/stream?topic=/camera/rgb/image_raw&width=%i&height=%i&quality=%i'
                          %(int(robot_num), int(width), int(height), int(quality)))
@@ -233,7 +262,6 @@ def main():
                     _ = cap.read()
                 thread = create_driver(25, cap)
                 first = False
-
         except:
             continue
 
@@ -259,12 +287,12 @@ def main():
         img = cv2.cvtColor(img, cv2.COLOR_HSV2BGR)
         #img = load_image(cap, robot_num=robot_num, width=width, height=height, quality=quality, image_counter=image_counter)
 
-        print("loading: ", time() - t)
+        #print("loading: ", time() - t)
 
         #Получем визуальные признаки с изображения
         signs = get_vis_signs(img, image_counter).reshape(-1, shape)
 
-        t = time()
+        #t = time()
         image_counter += 1
             # Получаем глобальные координаты для этих признаков
         update_visual(odom_val, data['time'], visual_coord, signs, global_vis, vis_keys, ind)
@@ -292,8 +320,8 @@ def main():
             two = list(X[np.where(y == 2)[0][-500:]])
             X = np.array(ones + two)
             y = np.array([1] * len(ones) + [2] * len(two))
-            np.savetxt('X', X)
-            np.savetxt('y', y)
+            # np.savetxt('X', X)
+            # np.savetxt('y', y)
             np.random.seed(10)
             np.random.shuffle(X)
             np.random.seed(10)
@@ -331,6 +359,14 @@ def main():
             else:
                 it = 2
             graph[int(xmatrix + 90)][int(ymatrix + 90)] = int(it);
+            # graph[int(xmatrix + 91)][int(ymatrix + 91)] = int(it);
+            # graph[int(xmatrix + 90)][int(ymatrix + 91)] = int(it);
+            # graph[int(xmatrix + 91)][int(ymatrix + 90)] = int(it);
+            # graph[int(xmatrix + 89)][int(ymatrix + 89)] = int(it);
+            # graph[int(xmatrix + 90)][int(ymatrix + 89)] = int(it);
+            # graph[int(xmatrix + 89)][int(ymatrix + 90)] = int(it);
+
         post_answer(graph)
+        print('iter time: ', time.time() - global_time)
 if __name__ == "__main__":
     sys.exit(main())
