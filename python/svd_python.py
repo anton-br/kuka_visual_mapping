@@ -12,6 +12,7 @@ import numpy as np
 from multiprocessing import Queue
 from threading import Thread
 from sklearn.externals import joblib
+from scipy import ndimage
 import keras.applications as zoo
 from PIL import Image, ImageFilter
 from sklearn.externals import joblib
@@ -97,8 +98,8 @@ def update_visual(odom_val, speed_time, visual_coord, signs, global_vis, vis_key
     f = open('./hello/vis_{}.txt'.format(ind), 'w')
     o = open('./hello/odom_{}.txt'.format(ind), 'w')
     for i, coord in enumerate(visual_coord):
-        coord_x = (coord[0] * rx - coord[1] * ry) + odom_val[0]
-        coord_y = (coord[0] * ry + coord[1] * rx) + odom_val[1]
+        coord_x = (coord[0] * rx + coord[1] * ry) + odom_val[0]
+        coord_y = (-coord[0] * ry + coord[1] * rx) + odom_val[1]
         coords = tuple((np.round(coord_x*10).astype(np.int32), np.round(coord_y*10).astype(np.int32)))
         f.write(str(coord[0]) +" "+str(coord[1]) + " " + str(signs[i][0]) + "\n")
         global_vis[coords].append(signs[i])
@@ -131,7 +132,7 @@ def update_train(inter_keys, global_speed, global_vis, global_train, global_targ
     print('after: ', target)
     target_new = []
     for i, tar in enumerate(target):
-        if tar > .16:
+        if tar > .17:
             tar = 1
         else:
             tar = 2
@@ -188,23 +189,50 @@ def update_floder():
     open('texts\\train.txt', 'a').write('')
     open('texts\\middle_vis.txt', 'w').write('')
 
-def load_point_cloud(src='./../../../Desktop/new_cloud_lazer.npy'):
-    point_cloud = np.load(src)[:,:-1][:-1][::-1]
-    shape = point_cloud.shape[0]
-    if shape < 784:
-        raise Exception('Point cloud have invalid shape. %s < 784.'%shape)
-    delete_num = shape - 784
-    delete_ind = np.random.randint(1, shape-1, delete_num)
-    point_cloud = np.delete(point_cloud, delete_ind, 0)
-    point_cloud = np.array(list(map(lambda a: [a[1], a[0]], point_cloud)))
-    return point_cloud
-
+# def load_point_cloud(src='./../../../Desktop/new_cloud_lazer.npy'):
+#     point_cloud = np.load(src)[:,:-1][:-1][::-1]
+#     shape = point_cloud.shape[0]
+#     if shape < 784:
+#         raise Exception('Point cloud have invalid shape. %s < 784.'%shape)
+#     delete_num = shape - 784
+#     delete_ind = np.random.randint(1, shape-1, delete_num)
+#     point_cloud = np.delete(point_cloud, delete_ind, 0)
+#     point_cloud = np.array(list(map(lambda a: [a[1], a[0]], point_cloud)))
+#     return point_cloud
+def load_point_cloud(src="./right_points_2"):
+    points = np.loadtxt(src)
+    return points
 # def load_visual_coord(src='./dist_map.txt'):
 #     f = open(src, 'r')
 #     coord = f.read()
 #     f.close()
 #     vis = np.array(coord.split(' '), dtype=np.float32).reshape(-1, 2).astype(np.float32) / 100
 #     return vis
+
+def fill_graph(graph, global_vis, tree, acc, shape):
+    for key, item in global_vis.items():
+        Tx = key[0]
+        Ty = key[1]
+        xmatrix = np.round(Tx).astype(int)
+        ymatrix = np.round(Ty).astype(int)
+
+        if tree is not None:
+            pred = tree.predict(np.array(item).reshape(-1, shape))
+            it = np.array(item).reshape(-1, shape)[:,0].copy()
+            it[it==0] = 2.
+            acc.append(len(np.where(it == pred)[0])/len(pred))
+            pred = np.round(np.mean(pred))
+        else:
+            pred = 1
+
+        # item = np.array(item)[:,0]
+        # counter = Counter(item)
+        # if counter[0] * 3 < counter[1]:
+        #     it = 1
+        # else:
+        #     it = 2
+        graph[int(xmatrix + 90)][int(ymatrix + 90)] = int(pred)
+
 
 def main():
     post_answer(np.array([]))
@@ -225,6 +253,7 @@ def main():
     image_counter = 0
     inter = []
     mode = 'bin'
+    all_trees = []
 
     if mode == 'bin':
         shape = 3
@@ -293,7 +322,6 @@ def main():
         signs = get_vis_signs(img, image_counter).reshape(-1, shape)
 
         #t = time()
-        image_counter += 1
             # Получаем глобальные координаты для этих признаков
         update_visual(odom_val, data['time'], visual_coord, signs, global_vis, vis_keys, ind)
         ind +=1
@@ -335,37 +363,60 @@ def main():
             vis_keys = vis_keys - inter_keys
             speed_keys = speed_keys - inter_keys
 
-        if tree is not None:
-            mass = tree.predict(signs.reshape(-1, shape))
-            a = signs.reshape(-1, shape)[:,0].copy()
-            print('two: ', len(np.where(a == 0.)[0]), 'mass: ', len(mass))
-            a[a==0] = 2
-            print("tree acc: ", len(np.where(a == mass)[0]), " / ",  len(mass))
-        else:
-            mass = np.ones(shape=(784, 1), dtype=np.int32)
+        # if tree is not None:
+        #     mass = tree.predict(signs.reshape(-1, shape))
+        #     a = signs.reshape(-1, shape)[:,0].copy()
+        #     print('two: ', len(np.where(a == 0.)[0]), 'mass: ', len(mass))
+        #     a[a==0] = 2
+        #     print("tree acc: ", len(np.where(a == mass)[0]), " / ",  len(mass))
+        # else:
+        #     mass = np.ones(shape=(784, 1), dtype=np.int32)
 
+        #real answers
         post = signs.reshape(-1, shape)[:,0].astype(np.int32)
         post[post == 0] = 2
-        graph = np.ones((180, 180), dtype=np.int32)
-        for key, item in global_vis.items():
-            Tx = key[0]
-            Ty = key[1]
-            xmatrix = np.round(Tx).astype(int);
-            ymatrix = np.round(Ty).astype(int);
-            item = np.array(item)[:,0]
-            counter = Counter(item)
-            if counter[0] * 3 < counter[1]:
-                it = 1
-            else:
-                it = 2
-            graph[int(xmatrix + 90)][int(ymatrix + 90)] = int(it);
-            # graph[int(xmatrix + 91)][int(ymatrix + 91)] = int(it);
-            # graph[int(xmatrix + 90)][int(ymatrix + 91)] = int(it);
-            # graph[int(xmatrix + 91)][int(ymatrix + 90)] = int(it);
-            # graph[int(xmatrix + 89)][int(ymatrix + 89)] = int(it);
-            # graph[int(xmatrix + 90)][int(ymatrix + 89)] = int(it);
-            # graph[int(xmatrix + 89)][int(ymatrix + 90)] = int(it);
 
+        graph = np.ones((180, 180), dtype=np.int32)
+
+        # for key, item in global_vis.items():
+        #     Tx = key[0]
+        #     Ty = key[1]
+        #     xmatrix = np.round(Tx).astype(int);
+        #     ymatrix = np.round(Ty).astype(int);
+        #     item = np.array(item)[:,0]
+        #     counter = Counter(item)
+        #     if counter[0] * 3 < counter[1]:
+        #         it = 1
+        #     else:
+        #         it = 2
+        #     graph[int(xmatrix + 90)][int(ymatrix + 90)] = int(it);
+
+        acc = []
+        fill_graph(graph, global_vis, tree, acc, shape)
+        if len(acc) == 0:
+            print('Tree is none')
+        else:
+            print('Tree acc: ', np.mean(acc))
+            if  np.mean(acc) > 0.8:
+                all_trees.append([tree, len(global_train)])
+                print('tree was appended')
+            else:
+                graph = np.ones((180, 180), dtype=np.int8)
+                tree, lenght = all_trees[-1]
+                acc_new = []
+                fill_graph(graph, global_vis, tree, acc_new, shape)
+                print('New acc: ', np.mean(acc_new))
+                global_train = global_train[:lenght]
+                global_target = global_target[:lenght]
+
+        struct = ndimage.generate_binary_structure(2, 2)
+        graph = graph - 1
+        graph = ndimage.binary_dilation(graph, structure=struct, iterations=3).astype(graph.dtype)
+        graph = graph + 1
+        t = time.time()
+        np.savetxt('./hello/graph_{}'.format(image_counter), graph)
+        print('time to save: ', time.time() - t)
+        image_counter += 1
         post_answer(graph)
         print('iter time: ', time.time() - global_time)
 if __name__ == "__main__":
