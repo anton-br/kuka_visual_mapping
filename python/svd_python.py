@@ -9,6 +9,7 @@ import time
 import keras
 import operator
 import numpy as np
+from scipy import stats
 from multiprocessing import Queue
 from threading import Thread
 from sklearn.externals import joblib
@@ -19,11 +20,6 @@ from sklearn.externals import joblib
 from tqdm import tqdm_notebook as tqn
 from collections import Counter, defaultdict
 from sklearn.ensemble import RandomForestClassifier
-
-# TODO 1. Стопорь роботоа и регулируй камеру! +
-# 2. Проверить правильность сборки массива для обучения.
-# 3. Надо поддреживать репрезентативность выборки, чтобы дерево не предсказывало для всего нули (как стандартную поверхность перемещения).
-# 4. Облако точек
 
 queue = []
 class LoopThread(Thread):
@@ -78,8 +74,7 @@ def post_answer(mass):
     val_js = json.dumps(val)
     requests.post("http://127.0.0.1:5000/new_val/", json=val_js).json()
 
-def update_speed(odom_val, global_speed, speed_keys):
-    key = tuple(list(map(lambda a: np.round(a * 10).astype(np.int32), odom_val[:2])))
+def update_speed(key, global_speed, speed_keys):
     global_speed[key].append(odom_val[-1])
     speed_keys.add(key)
 
@@ -88,7 +83,6 @@ def update_visual(odom_val, speed_time, visual_coord, signs, global_vis, vis_key
     curr_time = time.time()
     diff_time = curr_time - float(speed_time)
     print(diff_time)
-    # print(odom_val)
     rx = np.cos(odom_val[2])
     ry = np.sin(odom_val[2])
 
@@ -131,19 +125,32 @@ def update_train(inter_keys, global_speed, global_vis, global_train, global_targ
         return
     print('after: ', target)
     target_new = []
+    train_new = []
     for i, tar in enumerate(target):
         if tar > .17:
             tar = 1
         else:
             tar = 2
-        if len(train.shape) > 1:
-            num = [tar] * train.shape[0]
+
+        #TODO check this mode, maybe didn't working
+        if mode == 'bin':
+            target_new.append(tar)
+            train_new.append(stats.mode(train[i])[0][0])
         else:
-            num = [tar]*len(train[i]) if isinstance(train[i], (list, np.ndarray)) else [tar]
-        target_new.append(num)
-    if len(train.shape) == 1:
-        train = np.concatenate(train)
-    target = np.concatenate(target_new)
+            if len(train.shape) > 1:
+                num = [tar] * train.shape[0]
+            else:
+                num = [tar]*len(train[i]) if isinstance(train[i], (list, np.ndarray)) else [tar]
+            target_new.append(num)
+
+        if mode == 'bin':
+            target = target_new.copy()
+            train = train_new.copy()
+        else:
+            if len(train.shape) == 1:
+                train = np.concatenate(train)
+            target = np.concatenate(target_new)
+
     print('train.shape: ', train.shape, 'target shape: ', target.shape)
     global_target.append(target)
     global_train.append(train)
@@ -189,25 +196,9 @@ def update_floder():
     open('texts\\train.txt', 'a').write('')
     open('texts\\middle_vis.txt', 'w').write('')
 
-# def load_point_cloud(src='./../../../Desktop/new_cloud_lazer.npy'):
-#     point_cloud = np.load(src)[:,:-1][:-1][::-1]
-#     shape = point_cloud.shape[0]
-#     if shape < 784:
-#         raise Exception('Point cloud have invalid shape. %s < 784.'%shape)
-#     delete_num = shape - 784
-#     delete_ind = np.random.randint(1, shape-1, delete_num)
-#     point_cloud = np.delete(point_cloud, delete_ind, 0)
-#     point_cloud = np.array(list(map(lambda a: [a[1], a[0]], point_cloud)))
-#     return point_cloud
 def load_point_cloud(src="./right_points_2"):
     points = np.loadtxt(src)
     return points
-# def load_visual_coord(src='./dist_map.txt'):
-#     f = open(src, 'r')
-#     coord = f.read()
-#     f.close()
-#     vis = np.array(coord.split(' '), dtype=np.float32).reshape(-1, 2).astype(np.float32) / 100
-#     return vis
 
 def fill_graph(graph, global_vis, tree, acc, shape):
     for key, item in global_vis.items():
@@ -225,12 +216,14 @@ def fill_graph(graph, global_vis, tree, acc, shape):
         else:
             pred = 1
 
+        #if you want to write answers
         # item = np.array(item)[:,0]
         # counter = Counter(item)
         # if counter[0] * 3 < counter[1]:
         #     it = 1
         # else:
         #     it = 2
+
         graph[int(xmatrix + 90)][int(ymatrix + 90)] = int(pred)
 
 
@@ -297,7 +290,18 @@ def main():
         odom_val = np.array(data['data_odom'].replace(',', '.').split(' '))
         odom_val = np.array(list(filter(None, odom_val)), dtype=np.float32)
         # обновляем инфу о скорости, если она есть. Скорость тут, потому что необходимо, чтобы разница между координатами и картинкой была минимальна
-        update_speed(odom_val, global_speed, speed_keys)
+
+        #TODO:
+        """
+        1. Переводим одометрию в координаты
+        2. Если есть пересечения с визуальными признаками, запоминаем какой был признак и сохраняем скорости в массив + запоминаем текущее время
+        3. Пока, при смене одометрии, мы находимся на той же поверхности, собираем данные в один массив
+        4. Как только поверхность меняется, к данному визуальному признаку в соответствие ставится средняя скорость прохождения данного участка, с учетом времени
+        """
+        key = tuple(list(map(lambda a: np.round(a * 10).astype(np.int32), odom_val[:2])))
+
+        update_speed(key, global_speed, speed_keys)
+        if
         f = open('texts\\speed.txt', 'w')
         for speed in global_speed.keys():
             f.write(str(speed) + ":" + str(global_speed[speed]) + '\n')
@@ -409,6 +413,7 @@ def main():
                 global_train = global_train[:lenght]
                 global_target = global_target[:lenght]
 
+        #TODO вычислять отдельные препятствия и, если рядом есть другое препятствие, оставлять зазор, если он больше длины робота
         struct = ndimage.generate_binary_structure(2, 2)
         graph = graph - 1
         graph = ndimage.binary_dilation(graph, structure=struct, iterations=3).astype(graph.dtype)
