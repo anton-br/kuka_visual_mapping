@@ -74,7 +74,8 @@ def post_answer(mass):
     val_js = json.dumps(val)
     requests.post("http://127.0.0.1:5000/new_val/", json=val_js).json()
 
-def update_speed(key, global_speed, speed_keys):
+def update_speed(odom_val, global_speed, speed_keys):
+    key = tuple(list(map(lambda a: np.round(a * 10).astype(np.int32), odom_val[:2])))
     global_speed[key].append(odom_val[-1])
     speed_keys.add(key)
 
@@ -95,15 +96,45 @@ def update_visual(odom_val, speed_time, visual_coord, signs, global_vis, vis_key
         coord_x = (coord[0] * rx + coord[1] * ry) + odom_val[0]
         coord_y = (-coord[0] * ry + coord[1] * rx) + odom_val[1]
         coords = tuple((np.round(coord_x*10).astype(np.int32), np.round(coord_y*10).astype(np.int32)))
-        f.write(str(coord[0]) +" "+str(coord[1]) + " " + str(signs[i][0]) + "\n")
+        f.write(str(coord[0]) + " " + str(coord[1]) + " " + str(signs[i][0]) + "\n")
         global_vis[coords].append(signs[i])
         vis_keys.add(coords)
-    o.write(str(odom_val[0]) + " " + str(odom_val[1]) +" "+ str(odom_val[2]) +" "+ str(odom_val[3]))
+    o.write(str(odom_val[0]) + " " + str(odom_val[1]) + " " + str(odom_val[2]) + " " + str(odom_val[3]))
 
     f.close()
     o.close()
 
-def update_train(inter_keys, global_speed, global_vis, global_train, global_target):
+## TODO:
+"""
+1. inter keys == 2
+2. target = []
+"""
+def update_train_bin(inter_keys, new_global_speed, global_vis, global_train, global_target):
+    train = np.array(operator.itemgetter(*inter_keys)(global_vis))
+    if type(train[0][0]) == np.ndarray:
+        train = np.concatenate(train)
+    target = np.array(operator.itemgetter(*tuple(map(lambda v: tuple(v), train)))(new_global_speed))
+    target_list = []
+    print(train, target)
+    deleted = []
+    for i, tar in enumerate(target):
+        if isinstance(tar, (list, np.ndarray)):
+            if len(tar) == 0:
+                deleted.append(i)
+                continue
+            tar = np.mean(tar)
+        if tar > .17:
+            tar = 1
+        else:
+            tar = 2
+        target_list.append(tar)
+
+    train = np.delete(train, deleted, axis=0)
+    global_target.append(target_list)
+    global_train.append(train)
+
+
+def update_train(inter_keys, global_speed, global_vis, global_train, global_target,):
     target = np.array(operator.itemgetter(*inter_keys)(global_speed))
     train = np.array(operator.itemgetter(*inter_keys)(global_vis))
     if len(inter_keys) > 1:
@@ -125,44 +156,30 @@ def update_train(inter_keys, global_speed, global_vis, global_train, global_targ
         return
     print('after: ', target)
     target_new = []
-    train_new = []
     for i, tar in enumerate(target):
         if tar > .17:
             tar = 1
         else:
             tar = 2
-
-        #TODO check this mode, maybe didn't working
-        if mode == 'bin':
-            target_new.append(tar)
-            train_new.append(stats.mode(train[i])[0][0])
+        if len(train.shape) > 1:
+            num = [tar] * train.shape[0]
         else:
-            if len(train.shape) > 1:
-                num = [tar] * train.shape[0]
-            else:
-                num = [tar]*len(train[i]) if isinstance(train[i], (list, np.ndarray)) else [tar]
-            target_new.append(num)
-
-        if mode == 'bin':
-            target = target_new.copy()
-            train = train_new.copy()
-        else:
-            if len(train.shape) == 1:
-                train = np.concatenate(train)
-            target = np.concatenate(target_new)
-
+            num = [tar]*len(train[i]) if isinstance(train[i], (list, np.ndarray)) else [tar]
+        target_new.append(num)
+    if len(train.shape) == 1:
+        train = np.concatenate(train)
+    target = np.concatenate(target_new)
     print('train.shape: ', train.shape, 'target shape: ', target.shape)
     global_target.append(target)
     global_train.append(train)
 
-def load_image(cap=None, robot_num=25, width=224, height=224, quality=150, path_img=None, image_counter=0, mode='bin'):
+def load_image(queue=None, image_counter=0, mode='bin', path_img=None):
     if path_img is not None:
          img = Image.open(path_img)
          img = np.array(img.resize((224, 224)))
     else:
-        _, img = cap.read()
+        img = queue.pop()
     if mode == 'bin':
-        print(image_counter)
         cv2.imwrite('./images/img/{}_{}.png'.format(image_counter, image_counter), img)
         img = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
         img[:,:,0] = 0.
@@ -196,7 +213,7 @@ def update_floder():
     open('texts\\train.txt', 'a').write('')
     open('texts\\middle_vis.txt', 'w').write('')
 
-def load_point_cloud(src="./right_points_2"):
+def load_point_cloud(src="./right_points_3"):
     points = np.loadtxt(src)
     return points
 
@@ -215,38 +232,56 @@ def fill_graph(graph, global_vis, tree, acc, shape):
             pred = np.round(np.mean(pred))
         else:
             pred = 1
-
-        #if you want to write answers
+        #
+        # #if you want to write answers
         # item = np.array(item)[:,0]
         # counter = Counter(item)
         # if counter[0] * 3 < counter[1]:
-        #     it = 1
+        #     pred = 1
         # else:
-        #     it = 2
+        #     pred = 2
 
         graph[int(xmatrix + 90)][int(ymatrix + 90)] = int(pred)
 
+def calculate_speeds(surface_speed, new_global_speed, distance):
+    t = time.time()
+    surface_odom = np.vstack(np.array(surface_speed)[:,0])
+    odom_speed, surface_odom = np.mean(surface_odom[:,-1]), surface_odom[:,:3]
+    distance += np.linalg.norm(surface_odom[-1] - surface_odom[-2])
+    distance_speed = distance/(t - surface_speed[0][1])
+    new_global_speed[tuple(current_surface)].append(np.mean([distance_speed, odom_speed]))
+    print('new speed for {} by time and distance is {} and by odometry is {}'
+          .format(current_surface, distance_speed, odom_speed))
+    return distance
+
+def create_new_surface(new_global_speed):
+    surface_speed = []
+    current_surface = stats.mode(global_vis[key])[0][0]
+    surface_speed.append([odom_val, time.time()])
+    surface_odom = np.vstack(np.array(surface_speed)[:,0])
+    new_global_speed[tuple(current_surface)].append([np.mean(surface_odom[:,-1])])
+    return 0, surface_speed, current_surface
 
 def main():
     post_answer(np.array([]))
     #update_floder()
     global queue
-    global_vis = defaultdict(list)
-    global_speed = defaultdict(list)
-    global_target = []
-    global_train = []
-    vis_keys = set()
-    speed_keys = set()
-    visual_coord = load_point_cloud()#load_visual_coord()
-    flag_tree = 0
-    first = True
-    tree = None # будущее дерево
-    ind = 0 # индекс чтобы не считывать одни и те же данные несколько раз
-    data_counter = 0
-    image_counter = 0
-    inter = []
-    mode = 'bin'
-    all_trees = []
+    global_vis = defaultdict(list) # visual features as values and global coordinates as keys
+    global_speed = defaultdict(list) #  speed value as values and global coordinates as keys
+    new_global_speed = defaultdict(list)
+    global_target = [] # all target
+    global_train = [] # all training values
+    #surface_speed = [] # speed values on one surface
+    all_trees = [] # trained trees with more then 80% accuracy
+    inter = [] # intersection of vis_keys and speed_keys
+    vis_keys = set() # global coordinates of visual features
+    speed_keys = set() # global coordinates of speed values
+    visual_coord = load_point_cloud() # point cloud
+    first = True # flag indicating first image loading
+    new_surface = True # flag indicating that new surface is coming
+    tree = None # future tree
+    image_counter = 0 # help to save data to files
+    mode = 'bin' # mode of program work
 
     if mode == 'bin':
         shape = 3
@@ -255,7 +290,7 @@ def main():
 
     while True:
         global_time = time.time()
-        new_img = requests.get("http://127.0.0.1:5000/odom/")#шарп говорит когда начинать обрабатыавть новую картинку
+        new_img = requests.get("http://127.0.0.1:5000/odom/") # шарп говорит когда начинать обрабатыавть новую картинку
         try:
             data = new_img.json()
         except:
@@ -291,50 +326,64 @@ def main():
         odom_val = np.array(list(filter(None, odom_val)), dtype=np.float32)
         # обновляем инфу о скорости, если она есть. Скорость тут, потому что необходимо, чтобы разница между координатами и картинкой была минимальна
 
-        #TODO:
+        # TODO:
         """
         1. Переводим одометрию в координаты
         2. Если есть пересечения с визуальными признаками, запоминаем какой был признак и сохраняем скорости в массив + запоминаем текущее время
         3. Пока, при смене одометрии, мы находимся на той же поверхности, собираем данные в один массив
         4. Как только поверхность меняется, к данному визуальному признаку в соответствие ставится средняя скорость прохождения данного участка, с учетом времени
         """
-        key = tuple(list(map(lambda a: np.round(a * 10).astype(np.int32), odom_val[:2])))
 
-        update_speed(key, global_speed, speed_keys)
-        if
+        update_speed(odom_val, global_speed, speed_keys)
         f = open('texts\\speed.txt', 'w')
         for speed in global_speed.keys():
             f.write(str(speed) + ":" + str(global_speed[speed]) + '\n')
         f.close()
-        # если шарп готов к получению картинки, получаем её и обрабатываем
 
+        key = tuple(list(map(lambda a: np.round(a * 10).astype(np.int32), odom_val[:2])))
+        if new_surface:
+            if key not in global_vis.keys():
+                print('key not found in global_vis, cant create new surface')
+            else:
+                new_surface = False
+                distance, surface_speed, current_surface = create_new_surface(new_global_speed)
+                print('NEW surface was created!, odom is {}, surfase is {}'.format(odom_val, current_surface))
+        else:
+            if np.sum(stats.mode(global_vis[key])[0][0] == current_surface) == 3:
+                surface_speed.append([odom_val, time.time()])
+                print('vis was founded!')
+                distance = calculate_speeds(surface_speed, new_global_speed, distance)
+
+            elif len(surface_speed) == 1:
+                print('too fast we found diff surface')
+                new_global_speed[tuple(current_surface)].append(surface_speed[0][-1])
+
+            else:
+                print('THE END')
+                calculate_speeds(surface_speed, new_global_speed, distance)
+                print('goblal speed are: ', new_global_speed)
+
+                distance, surface_speed, current_surface = create_new_surface(new_global_speed)
+                print('NEW surface was created!, odom is {}, surfase is {}'.format(odom_val, current_surface))
+
+        # если шарп готов к получению картинки, получаем её и обрабатываем
         if len(queue) == 0:
             continue
-        img = queue.pop()
-        #print('len queue: ', len(queue))
-        cv2.imwrite('./images/img/{}_{}.png'.format(image_counter, image_counter), img)
-        img = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
-        img[:,:,0] = 0.
-        img[:,:,-1] = 255.
-        img[:,:,1] = np.array([0. if i < 100. else 255. for i in img[:,:,1].ravel()]).reshape(224, 224)
-        img = cv2.cvtColor(img, cv2.COLOR_HSV2BGR)
-        #img = load_image(cap, robot_num=robot_num, width=width, height=height, quality=quality, image_counter=image_counter)
-
-        #print("loading: ", time() - t)
+        img = load_image(queue, image_counter, mode)
 
         #Получем визуальные признаки с изображения
         signs = get_vis_signs(img, image_counter).reshape(-1, shape)
 
-        #t = time()
-            # Получаем глобальные координаты для этих признаков
-        update_visual(odom_val, data['time'], visual_coord, signs, global_vis, vis_keys, ind)
-        ind +=1
+        # Получаем глобальные координаты для этих признаков
+        update_visual(odom_val, data['time'], visual_coord, signs, global_vis, vis_keys, image_counter)
         inter_keys = vis_keys & speed_keys
         print("Num inter: ", len(inter_keys))
         if len(inter_keys) != 0:
             inter.append(inter_keys)
-            flag_tree = 0
-            update_train(inter_keys, global_speed, global_vis, global_train, global_target)
+            if mode == 'bin':
+                update_train_bin(inter_keys, new_global_speed, global_vis, global_train, global_target, mode)
+            else:
+                update_train(inter_keys, global_speed, global_vis, global_train, global_target, mode)
 
             try:
                 y = np.concatenate(global_target)
@@ -381,22 +430,8 @@ def main():
         post[post == 0] = 2
 
         graph = np.ones((180, 180), dtype=np.int32)
-
-        # for key, item in global_vis.items():
-        #     Tx = key[0]
-        #     Ty = key[1]
-        #     xmatrix = np.round(Tx).astype(int);
-        #     ymatrix = np.round(Ty).astype(int);
-        #     item = np.array(item)[:,0]
-        #     counter = Counter(item)
-        #     if counter[0] * 3 < counter[1]:
-        #         it = 1
-        #     else:
-        #         it = 2
-        #     graph[int(xmatrix + 90)][int(ymatrix + 90)] = int(it);
-
         acc = []
-        fill_graph(graph, global_vis, tree, acc, shape)
+        #fill_graph(graph, global_vis, tree, acc, shape)
         if len(acc) == 0:
             print('Tree is none')
         else:
